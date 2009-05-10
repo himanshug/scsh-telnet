@@ -121,7 +121,7 @@
 (define-record telnet
   host
   port
-  sock-stream
+  sock
   (cookedq nil)
   (eof #f)
   (iacseq nil)
@@ -141,7 +141,7 @@
     (make-telnet host port sock)))
 
 (define (close-telnet-session tn)
-  (close-socket (telnet:sock-stream tn))
+  (close-socket (telnet:sock tn))
   (if (telnet:debug-on tn)
       (format #t "~%Telnet Stream Closed~%")))
 
@@ -196,17 +196,23 @@
       (read-char in)
       nil))
 
+; Internal procedure to read all the available data from the
+; socket to cookedq. By default its a non-blocking call.
+; Return : +no-data+, when no data filled the cookedq.
+; Return : +old-data+, when no new data read from the socket but cookedq has
+;   old data.
+; Return : +new-data+, when new data are read from socket stream to cookedq.
 (define (process-sock-stream% tn . block-read)
-  (let ((sock-stream-in (socket:inport (telnet:socket-stream tn)))
-        (sock-stream-out (socket:outport (telnet:socket-stream tn)))
+  (let ((sock-stream-in (socket:inport (telnet:sock tn)))
+        (sock-stream-out (socket:outport (telnet:sock tn)))
         (char-callback (telnet:char-callback tn))
         (option-callback (telnet:option-callback tn))
         (sb-option-callback (telnet:sb-option-callback tn))
         (debug-on (telnet:debug-on tn))
         (remove-return-char (telnet:remove-return-char tn))
         (block-read (if (null? block-read) #f #t)) 
-        c cmd opt (len (length cookedq)))
-    (unless eof
+        c cmd opt (len (length (telnet:cookedq))))
+    (unless (telnet:eof tn)
             (if block-read
                 (set! c (read-char sock-stream-in))
                 (set! c (read-char-no-hang sock-stream-in)))
@@ -214,14 +220,11 @@
                 (set-telnet:eof tn #t)))
 
     (if (or (telnte:eof tn) (null? c))
-        (if (= 0 len)
-            ;todo: could not signal telnet-eof, impact?
-            +no-data+ +old-data)
+        (if (= 0 len) +no-data+ +old-data)
         (let loop ()
-          ;body here
           (case (length (telnet:iacseq tn))
             ((0) ;;length of iacseq
-             (cond 
+             (cond
               ((char=? c +theNULL+))
               ((char=? c (ascii->char 21)))
               ((char=? c +IAC+)
@@ -230,7 +233,7 @@
                (if (= (telnet:sb tn) 0)
                    (unless (and remove-return-char (char=? c #\newline))
                            (when char-callback
-                               (char-callback c sock-stream-out)) ;TODO
+                               (char-callback c sock-stream-out))
                            (append (telnet:cookedq tn) (list c)))
                    (append (telnet:sbdataq tn) (list c))))))
             ((1) ;;length of iacseq
@@ -253,11 +256,11 @@
                               (/= 0 (length (telnet:sbdataq tn))))
                          (write-line (format #f "sbdata: ~a" (telnet:sbdataq tn))))
                      (if sb-option-callback ;;TODO: change here
-                         (sb-option-callback sock-stream-in))
+                         (sb-option-callback sock-stream-out (telnet:sbdataq tn)))
                      (if debug-on (format #t "~%....SE........~%")))
                     (else
-                     (if option-callback ;;TODO: change here
-                         (option-callback sock-stream c +NOOPT+)
+                     (if option-callback
+                         (option-callback sock-stream-out c +NOOPT+)
                          (if debug-on
                              (format #t "IAC ~d not recognized" (char->ascii c)))))))))
             ((2) ;;length of iacseq
@@ -272,18 +275,18 @@
                            (if (char=? cmd +DO+)
                                "DO" "DONT")
                            (char->ascii opt)))
-               (if option-callback ;;todo: change here
-                   (option-callback sock-stream-in cmd opt)
-                   (begin ;;todo: an issue here
-                     (write-string (format #f "~a~a~a" +IAC+ +WONT+ opt)))))
+               (if option-callback
+                   (option-callback sock-stream-out cmd opt)
+                   (begin
+                     (write-string (format #f "~a~a~a" +IAC+ +WONT+ opt) sock-stream-out))))
               ((or (char=? cmd +WILL+)
                    (char=? cmd +WONT+))
                (if debug-on
                    (format #t "IAC ~s ~d~%" (if (char=? cmd +WILL+) "WILL" "WONT")
                            (char->ascii opt)))
-               (if option-callback ;;todo:change here
-                   (option-callback sock-stream-in cmd opt)
-                   (write-string (format #f "~a~a~a" +IAC+ +DONT+ opt)))))))
+               (if option-callback
+                   (option-callback sock-stream-out cmd opt)
+                   (write-string (format #f "~a~a~a" +IAC+ +DONT+ opt) sock-stream-out))))))
           (set! c (read-char-no-hang sock-stream-in))
           (if (eof-object? c)
               (set-telnet:eof tn #t)
@@ -292,7 +295,7 @@
                       +new-data+
                       (if (= 0 len)
                           (begin
-                            (if (telnet:eof tn)) ;;todo: signal telnet-eof)
+                            ;(if (telnet:eof tn)) ;;todo: signal telnet-eof)
                             +no-data+)
                           +old-data))
                   (loop)))))))
@@ -309,31 +312,32 @@
     (set-telnet:cookedq nil)))
 
 ; searches for occurance of string str1 in str2
-; returns index of first occurance of str1 or returns -1
+; Param: search-start - index where to start the search from in str2
+; Param: case-sensitive - should do a case sensitive or insensitive
+;   match, by default it is true.
+; Return: index of first occurance of str1 or returns -1
 (define (search str1 str2 search-start . case-sensitive)
-  (let ((result
+  (let* ((case-sensitive (if (null? case-sensitive) #t
+                             (first case-sensitive)))
+         (result
          (if case-sensitive
              (string-contains str2 str1 search-start)
              (string-contains-ci str2 str1 search-start))))
     (or result -1)))
         
-"Read the cookedq from 0 to end-pos."
+; Read the cookedq from 0 to end-pos(excluding the character AT end-pos
 (define (read-cookedq% tn end-pos)
   (let ((cookedq (telnet:cookedq tn)))
     (if (>= (length cookedq) end-pos)
         (set-telnet:cookedq tn (list-tail cookedq end-pos))
         (set-telnet:cookedq tn nil))))
  
-
- 
-;we exit only in three cases
-; - we got the string
-; - time out
-; - reached eof
-;;read-until without timeout
+; Read until a given string is encountered.
+; When no match is found, return nil with a +eof+ or +timeout+, and
+; all the received data will still stay in the cookedq.
 (define (read-until tn str case-sensitive)
   (let* ((debug-on (telnet:debug-on tn))
-         (sock-stream-in (socket:inport (telnet:sock-stream tn)))
+         (sock-stream-in (socket:inport (telnet:sock tn)))
          pos
          (read-status (process-sock-stream% tn))
          data-len
@@ -344,7 +348,7 @@
       (if (>= (- data-len search-start) str-len)
           (begin 
             (set! pos (search str (list->string (telnet:cookedq tn)) search-start case-sensitive))
-            (set! search-start (+ 2 (- data-len 1 str-len))))
+            (set! search-start (+ 2 (- data-len (+ 1 str-len)))))
           (set! pos -1))
 
       (if (>= pos 0)
