@@ -95,11 +95,14 @@
 (define +timeout+  4)
 (define +eof+ 5)
 (define +ok+ 6)
+(define +CR+ (ascii->char 13)) ;carriage return character
 
 ;utilities
 (define nil '())
 (define (find obj list)
   (memq obj list))
+
+;destructive append
 
 ;when macro
 (define-syntax when
@@ -115,6 +118,21 @@
      (if (not test)
          (begin stmt1 stmt2 ...)))))
 
+;macro for (/= num1 num2) that is (not (= number1 number2))
+(define-syntax /=
+  (syntax-rules ()
+    ((/= num1 num2)
+     (not (= num1 num2)))))
+
+;macro with-record-fields  -- TODO
+;(define-syntax with-record-fields
+;  (syntax-rules ()
+;    ((with-record-fields (f1 f2 ...) rec body))))
+
+;(define-syntax foo
+;  (syntax-rules ()
+;    ((foo body) ( 'body))))
+
 ;----------------------------------------------------------------
 
 ;telnet implementation
@@ -129,7 +147,11 @@
   (sbdataq nil)
   (option-callback default-option-callback%)
   (sb-option-callback default-sb-option-callback%)
-  (char-callback (lambda (c s) (display c)))
+  (char-callback (lambda (c s)
+                   (format #t "himanshu: char call back, ~d~%" 
+                           (char->ascii c))
+                   ;(display c)
+                   ))
   (remove-return-char #t)
   (debug-on #f))
 
@@ -146,14 +168,13 @@
       (format #t "~%Telnet Stream Closed~%")))
 
 (define (default-option-callback% out-stream cmd code)
+  (format #t "himanshu: default option callback~%")
   (if (and (char=? cmd +DO+) (char=? code +TTYPE+))
       (begin
-        (write-string
-         (format #f "~a~a~a" +IAC+ +WILL+ +TTYPE+)
-         out-stream)
-        (write-string (format #f "send back: WILL!~%"))
+         (format out-stream "~a~a~a" +IAC+ +WILL+ +TTYPE+)
+         (format #t "send back: WILL!~%")
         nil)
-      (let (cc (ok #f))
+      (let ((cc nil) (ok #f))
         (cond ((or (char=? cmd +WILL+)
                    (char=? cmd +WONT+))
                (set! cc +DONT+)
@@ -166,23 +187,18 @@
                (set! ok #t)))
         (if ok
             (begin
-              (write-string (format #f "~a~a~a" +IAC+ cc code)
-                            out-stream)
-              (write-string (format #f "Send back!~%")))
-            (write-string (format #f "IAC ~a not recognized" (char->ascii cmd)))))))
+              (format out-stream "~a~a~a" +IAC+ cc code)
+              (format #t "Send back!~%")))
+        (format #t "IAC ~a not recognized" (char->ascii cmd)))))
 
 
 (define (send-sub-terminal-type-is% s-out . ttype)
   (let ((ttype (if (null? ttype) "UNKNOWN" ttype)))
-    (write-string
-     (format #f "~a~a~a~a~a~a~a" +IAC+ +SB+ +TTYPE+ (ascii->char 0) ttype +IAC+ +SE+)
-     s-out)
-    (write-string
-     (format t "~%(~a)(~a)(~a)(~a)~a(~a)(~a)"
-          (char->ascii +IAC+) (char->ascii +SB+) (char->ascii +TTYPE+) 0 ttype (char->ascii +IAC+) (char->ascii +SE+))
-     s-out)))
-
+    (format s-out "~a~a~a~a~a~a~a" +IAC+ +SB+ +TTYPE+ (ascii->char 0) ttype +IAC+ +SE+)
+    (format #t "~%(~a)(~a)(~a)(~a)~a(~a)(~a)"
+            (char->ascii +IAC+) (char->ascii +SB+) (char->ascii +TTYPE+) 0 ttype (char->ascii +IAC+) (char->ascii +SE+))))
 (define (default-sb-option-callback% out-stream sbdata)
+  (format #t "himanshu:sb-option-callback~%")
   (if (and (char=? (list-ref sbdata 0) +TTYPE+)
            (char=? (list-ref sbdata 1) (ascii->char 1)))
       (send-sub-terminal-type-is% out-stream)))
@@ -210,8 +226,8 @@
         (sb-option-callback (telnet:sb-option-callback tn))
         (debug-on (telnet:debug-on tn))
         (remove-return-char (telnet:remove-return-char tn))
-        (block-read (if (null? block-read) #f #t)) 
-        c cmd opt (len (length (telnet:cookedq))))
+        (block-read (if (null? block-read) #f (first block-read))) 
+        (c nil) (cmd nil) (opt nil) (len (length (telnet:cookedq tn))))
     (unless (telnet:eof tn)
             (if block-read
                 (set! c (read-char sock-stream-in))
@@ -219,33 +235,37 @@
             (if (eof-object? c)
                 (set-telnet:eof tn #t)))
 
-    (if (or (telnte:eof tn) (null? c))
-        (if (= 0 len) +no-data+ +old-data)
+    (if (or (telnet:eof tn) (null? c))
+        (if (= 0 len) +no-data+ +old-data+)
         (let loop ()
+          (format #t "himanshu: got inside loop, c:~d~%"
+                  (char->ascii c))
+          (format #t "himanshu: cookedq:~a~%" (telnet:cookedq tn))
           (case (length (telnet:iacseq tn))
             ((0) ;;length of iacseq
              (cond
               ((char=? c +theNULL+))
               ((char=? c (ascii->char 21)))
               ((char=? c +IAC+)
-               (append (telnet:iacseq tn) (list c)))
+               (set-telnet:iacseq ;TODO; use destructive append
+                tn (append (telnet:iacseq tn) (list c))))
               (else
                (if (= (telnet:sb tn) 0)
-                   (unless (and remove-return-char (char=? c #\newline))
+                   (unless (and remove-return-char (char=? c +CR+))
                            (when char-callback
                                (char-callback c sock-stream-out))
-                           (append (telnet:cookedq tn) (list c)))
-                   (append (telnet:sbdataq tn) (list c))))))
+                           (set-telnet:cookedq tn (append (telnet:cookedq tn) (list c)))) ;TODO; use destructive append
+                   (set-telnet:sbdataq tn (append (telnet:sbdataq tn) (list c))))))) ;TODO; use destructive append
             ((1) ;;length of iacseq
              (if (find c (list +DO+ +DONT+ +WILL+ +WONT+))
-                 (append (telnet:iacseq tn) (list c))
+                 (set-telnet:iacseq tn (append (telnet:iacseq tn) (list c))) ;TODO; use destructive append
                  (begin ;;else
                    (set-telnet:iacseq tn nil)
                    (cond
                     ((char=? c +IAC+) ;;+IAC+ +IAC+
                      (if (= 0 (telnet:sb tn))
-                         (append (telnet:cookedq tn) (list c))
-                         (append (telnet:sbdataq tn) (list c))))
+                         (set-telnet:cookedq tn (append (telnet:cookedq tn) (list c))) ;TODO; use destructive append
+                         (set-telnet:sbdataq tn (append (telnet:sbdataq tn) (list c))))) ;TODO; use destructive append
                     ((char=? c +SB+) ;;+IAC+ +SB+
                      (when debug-on (format #t "~%.......SB......~%"))
                      (set-telnet:sb tn 1)
@@ -254,7 +274,7 @@
                      (set-telnet:sb tn 0)
                      (if (and debug-on
                               (/= 0 (length (telnet:sbdataq tn))))
-                         (write-line (format #f "sbdata: ~a" (telnet:sbdataq tn))))
+                         (write-string (format #f "sbdata: ~a" (telnet:sbdataq tn))))
                      (if sb-option-callback ;;TODO: change here
                          (sb-option-callback sock-stream-out (telnet:sbdataq tn)))
                      (if debug-on (format #t "~%....SE........~%")))
@@ -297,19 +317,21 @@
                           (begin
                             ;(if (telnet:eof tn)) ;;todo: signal telnet-eof)
                             +no-data+)
-                          +old-data))
+                          +old-data+))
                   (loop)))))))
 
-(define peek-available-data (tn . block-read)
-   (let ((block-read (if (null? block-read) #f #t)))
+(define (peek-available-data tn . block-read)
+   (let ((block-read (if (null? block-read) #f (first block-read))))
     (process-sock-stream% tn block-read)
     (apply list (telnet:cookedq tn))))
 
-(define read-available-data (tn . block-read)
-  (let ((block-read (if (null? block-read) #f #t)))
+(define (read-available-data tn . block-read)
+  (let ((block-read (if (null? block-read) #f (first block-read)))
+        (result nil))
     (process-sock-stream% tn block-read)
-    (apply list (telnet:cookedq tn))
-    (set-telnet:cookedq nil)))
+    (set! result (apply list (telnet:cookedq tn)))
+    (set-telnet:cookedq nil)
+    result))
 
 ; searches for occurance of string str1 in str2
 ; Param: search-start - index where to start the search from in str2
@@ -338,9 +360,10 @@
 (define (read-until tn str case-sensitive)
   (let* ((debug-on (telnet:debug-on tn))
          (sock-stream-in (socket:inport (telnet:sock tn)))
-         pos
+         (pos nil)
+         (block-read #t)
          (read-status (process-sock-stream% tn))
-         data-len
+         (data-len nil)
          (search-start 0)
          (str-len (string-length str)))
     (let outer-loop ()
@@ -372,56 +395,5 @@
                           (inner-loop))))))))))
 
 
-
-;(define (wait-until-read% -- Not needed for now
-;;a read-until with timeout
-(define (read_until tn str char-equal-func . timeout)
-  (let* ((debug-on (telnet:debug-on tn))
-         (sock-stream-in (socket:inport (telnet:sock-stream tn)))
-         start-time
-         elasped
-         (timeout (if (null? timeout) 600 #f))
-         (block-read (if timeout #f #t))
-         pos
-         (read-status (process-sock-stream% tn))
-         data-len
-         (search-start 0)
-         (str-len (string-length str)))
-    (if timeout (set! start-time (time)))
-    (let outer-loop ()
-      (set! data-len (length (telnet:cookedq tn)))
-      (if (>= (- data-len search-start) str-len)
-          (begin 
-            (set! pos (search (string->list str) (telnet:cookedq tn) search-start char-equal-func))
-            (set! search-start (+ 2 (- data-len 1 str-len))))
-          (set! pos -1))
-
-      (if (>= pos 0)
-          (begin
-            (set! pos (+ pos str-len))
-            (values (read-cookedq% tn pos) +ok+))
-          (if (telnet:eof tn)
-              (begin
-                (display "eof!!")
-                (values nil +eof+))
-              (let inner-loop ()
-                (set! elasped (- (time) start-time))
-                (if (>= elasped timeout)
-                    (begin
-                      (display "Timeout!")
-                      (values nil +timeout+))
-                    (case (wait-until-readable% sock-stream-in (- timeout elasped) debug-on)
-                      ((+eof+)
-                       (set-telnet:eof #t)
-                       (values nil +eof+))
-                      ((+timeout+) (values nil +timeout+))
-                      (else
-                       ;;todo: (sleep 0.25)
-                       (set! read-status (process-sock-stream% tn block-read))
-                       (if (= read-status +new-data+)
-                           (outer-loop)
-                           (if (telnet:eof tn)
-                               (begin
-                                 (display "eof!")
-                                 (values nil +eof+))
-                               (inner-loop))))))))))))
+(define (write-ln tn str)
+  (format (socket:outport (telnet:sock tn)) #f "~a~%" str))
