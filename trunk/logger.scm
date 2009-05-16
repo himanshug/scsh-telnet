@@ -22,22 +22,22 @@
 ;Implementation
 ;************************************************************
 
-(define +LOG-OUTPUT-STREAM+ #t)
-(define +LOG-LEVEL+ +error+)
+(define *LOG-OUTPUT-STREAM* #t)
+(define *LOG-LEVEL* +error+)
 
 ; functions
 (define (set-log-level! level)
-  (set! +LOG-LEVEL+ level))
+  (set! *LOG-LEVEL* level))
 (define (set-log-output-stream! out-stream)
-  (set! +LOG-OUTPUT-STREAM+ out-stream))
+  (set! *LOG-OUTPUT-STREAM* out-stream))
 
 (define (get-logger name)
   (lambda (level format-str . args)
-    (when (>= level +LOG-LEVEL+)
+    (when (>= level *LOG-LEVEL*)
           (apply write-log (cons name (cons format-str args))))))
 
 (define (write-log name format-str . args)
-  (apply format (cons +LOG-OUTPUT-STREAM+ (cons format-str args))))
+  (apply format (cons *LOG-OUTPUT-STREAM* (cons format-str args))))
 
 ;Finished
 ;**************************************************************
