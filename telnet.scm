@@ -382,20 +382,37 @@
                 (set-telnet:cookedq tn (cdr partial-cookedq))
                 (set-cdr! partial-cookedq nil))))
         (list->string result))))
+
+; waits until in-port is ready to be read or timeout is
+; reached.
+; This considers eof as ready to be read
+; Returns:
+;  '(), if timeout is reached.
+;  '(in-port), if the port is ready to be read or eof has been reached.
+; Note: timeout is in seconds.
+(define (wait-until-readable% in-port . timeout)
+  (let ((timeout (if (null? timeout) #f (first timeout))))
+    (select-ports timeout in-port)))
  
 ; Read until a given string is encountered.
 ; When no match is found, return nil with a +eof+ or +timeout+ .
+; By default the timeout is 600 secs
+; Note: timeout is in seconds.
 (with-record-fields
  (debug-on sock cookedq eof)
  telnet tn
- (define (read-until tn str case-sensitive)
+ (define (read-until tn str case-sensitive . timeout)
    (let ((sock-stream-in (socket:inport sock))
           (pos nil)
-          (block-read #f)
+          (block-read (if (null? timeout) #t #f))
+          (timeout (if (null? timeout) 600 (first timeout)))
           (read-status (process-sock-stream% tn))
           (data-len nil)
           (search-start 0)
+          (start-time nil)
+          (elasped-time nil)
           (str-len (string-length str)))
+     (if timeout (set! start-time (time)))
      (let outer-loop ()
        (set! data-len (length cookedq))
        (if (>= (- data-len search-start) str-len)
@@ -408,21 +425,28 @@
            (begin
              (set! pos (+ pos str-len))
              (values (read-cookedq% tn pos) +ok+))
-           (if (telnet:eof tn)
+           (if eof
                (begin
                  (format #t "eof!!")
                  (values nil +eof+))
                (begin
                  (let inner-loop ()
-                   ;;TODO: sleep for some time
-                   (set! read-status (process-sock-stream% tn block-read))
-                   (if (= read-status +new-data+)
-                       (outer-loop)
-                       (if eof
-                           (begin
-                             (format #t "eof!!")
-                             (values nil +eof+))
-                           (inner-loop)))))))))))
+                   (when timeout
+                         (set! elasped-time (- (time) start-time)))
+                   (if (and timeout (>= elasped-time timeout))
+                       (begin (format #t "TimeOut!") (values nil +timeout+))
+                       (case (wait-until-readable% sock-stream-in (- timeout elasped-time))
+                         ((nil) (begin (format #t "TimeOut!") (values nil +timeout+)))
+                         (else
+                          (process-sleep .25) ;sleep for 250 ms
+                          (set! read-status (process-sock-stream% tn block-read))
+                          (if (= read-status +new-data+)
+                              (outer-loop)
+                              (if eof
+                                  (begin
+                                    (format #t "eof!!")
+                                    (values nil +eof+))
+                                  (inner-loop))))))))))))))
 
 
 
