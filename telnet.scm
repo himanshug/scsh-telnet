@@ -96,69 +96,9 @@
 (define +eof+ 5)
 (define +ok+ 6)
 (define +CR+ (ascii->char 13)) ;carriage return character
-
-;utilities
-(define nil '())
-(define (find obj list)
-  (memq obj list))
-
-;replace item1 with item2 in given list
-(define (replace list item1 item2 . eq-pred?)
-  (let ((eq-pred? (if (null? eq-pred?) eq? (first eq-pred?))))
-    (map (lambda (x)
-           (if (list? x)
-               (replace x item1 item2 eq-pred?)
-               (if (eq? x item1) item2 x))) list)))
-
-;destructive append
-
-;when macro
-(define-syntax when
-  (syntax-rules () 
-    ((when test stmt1 stmt2 ...)
-     (if test
-         (begin stmt1 stmt2 ...)))))
-
-;unless macro
-(define-syntax unless
-  (syntax-rules () 
-    ((unless test stmt1 stmt2 ...)
-     (if (not test)
-         (begin stmt1 stmt2 ...)))))
-
-;macro for (/= num1 num2) that is (not (= number1 number2))
-(define-syntax /=
-  (syntax-rules ()
-    ((/= num1 num2)
-     (not (= num1 num2)))))
-
-
-; a macro to mimic with-slots in lisp for records
-; syntax:
-; (with-record-fields (field1 field2 ...) record-name record
-;                     stmt1 stmt2 ...)
-; any occurance of field is replaced by (record-name:field record)
-; any occurance of set-field! is replaced by set-record-name:field
-; CAUTION: this *should* only be used as a top level form and not inside
-; any scheme form
-(define-syntax with-record-fields
-  (syntax-rules ()
-    ((with-record-fields (f1 ...) record-name record stmt1 ...)
-     (let ((body-as-data (list 'begin 'stmt1 ... ))
-           (record-name-str (symbol->string 'record-name)))
-       (set! body-as-data
-             (replace body-as-data 
-                      'f1
-                      (list (string->symbol (string-append record-name-str ":" (symbol->string 'f1))) 'record)))
-       ...
-       (set! body-as-data
-             (replace body-as-data
-                      (string->symbol (string-append "set-" (symbol->string 'f1) "!"))
-                      (string->symbol (string-append "set-" record-name-str ":" (symbol->string 'f1)))))
-       ...
-       (eval body-as-data (interaction-environment))))))
-
 ;----------------------------------------------------------------
+
+(define log (get-logger "telnet"))
 
 ;telnet implementation
 (define-record telnet
@@ -173,12 +113,8 @@
   (option-callback default-option-callback%)
   (sb-option-callback default-sb-option-callback%)
   (char-callback (lambda (c s)
-                   (format #t "himanshu: char call back, ~d~%" 
-                           (char->ascii c))
-                   ;(display c)
-                   ))
-  (remove-return-char #t)
-  (debug-on #f))
+                   (log +debug+ "char call back, ~d~%" (char->ascii c))))
+  (remove-return-char #t))
 
 ;given a host and (optional)port, initiates a connection
 ;and returns the telnet record
@@ -189,41 +125,40 @@
 
 (define (close-telnet-session tn)
   (close-socket (telnet:sock tn))
-  (if (telnet:debug-on tn)
-      (format #t "~%Telnet Stream Closed~%")))
+  (log +debug+ "~%Telnet Stream Closed~%"))
 
 (define (default-option-callback% out-stream cmd code)
-  (format #t "himanshu: default option callback~%")
+  (log +debug+ "default option callback called~%")
   (if (and (char=? cmd +DO+) (char=? code +TTYPE+))
       (begin
          (format out-stream "~a~a~a" +IAC+ +WILL+ +TTYPE+)
-         (format #t "send back: WILL!~%")
+         (log +info+ "send back: WILL!~%")
         nil)
       (let ((cc nil) (ok #f))
         (cond ((or (char=? cmd +WILL+)
                    (char=? cmd +WONT+))
                (set! cc +DONT+)
-               (write-string "DONT")
+               (log +info+ "DONT")
                (set! ok #t))
               ((or (char=? cmd +DO+)
                    (char=? cmd +DONT+))
                (set! cc +WONT+)
-               (write-string "WONT")
+               (log +info+ "WONT")
                (set! ok #t)))
         (if ok
             (begin
               (format out-stream "~a~a~a" +IAC+ cc code)
-              (format #t "Send back!~%")))
-        (format #t "IAC ~a not recognized" (char->ascii cmd)))))
+              (log +info+ "Send back!~%")))
+        (log +info+ "IAC ~a not recognized" (char->ascii cmd)))))
 
 
 (define (send-sub-terminal-type-is% s-out . ttype)
   (let ((ttype (if (null? ttype) "UNKNOWN" ttype)))
     (format s-out "~a~a~a~a~a~a~a" +IAC+ +SB+ +TTYPE+ (ascii->char 0) ttype +IAC+ +SE+)
-    (format #t "~%(~a)(~a)(~a)(~a)~a(~a)(~a)"
+    (log +info+ "~%(~a)(~a)(~a)(~a)~a(~a)(~a)"
             (char->ascii +IAC+) (char->ascii +SB+) (char->ascii +TTYPE+) 0 ttype (char->ascii +IAC+) (char->ascii +SE+))))
 (define (default-sb-option-callback% out-stream sbdata)
-  (format #t "himanshu:sb-option-callback~%")
+  (log +debug+ "sb-option-callback called~%")
   (if (and (char=? (list-ref sbdata 0) +TTYPE+)
            (char=? (list-ref sbdata 1) (ascii->char 1)))
       (send-sub-terminal-type-is% out-stream)))
@@ -246,7 +181,7 @@
 
 (with-record-fields
  (sock char-callback option-callback sb-option-callback sb
-       debug-on remove-return-char cookedq eof sbdataq iacseq)
+       remove-return-char cookedq eof sbdataq iacseq)
  telnet tn
  (define (process-sock-stream% tn . block-read)
    (let ((sock-stream-in (socket:inport sock))
@@ -263,9 +198,8 @@
      (if (or eof (null? c))
          (if (= 0 len) +no-data+ +old-data+)
          (let loop ()
-           (format #t "himanshu: got inside loop, c:~d~%"
+           (log +debug+ "process-sock-stream%: Got inside loop, c:~d~%"
                    (char->ascii c))
-           (format #t "himanshu: cookedq:~a~%" (telnet:cookedq tn))
            (case (length iacseq)
              ((0) ;;length of iacseq
               (cond
@@ -292,22 +226,20 @@
                           (set-cookedq! tn (append cookedq (list c))) ;TODO; use destructive append
                           (set-sbdataq! tn (append sbdataq (list c))))) ;TODO; use destructive append
                      ((char=? c +SB+) ;;+IAC+ +SB+
-                      (when debug-on (format #t "~%.......SB......~%"))
+                      (log +info+ "~%.......SB......~%")
                       (set-sb! tn 1)
                       (set-sbdataq! tn nil))
                      ((char=? c +SE+) ;;+IAC+ +SE+
                       (set-sb! tn 0)
-                      (if (and debug-on
-                               (/= 0 (length sbdataq)))
-                          (format #t "sbdata: ~a" sbdataq))
+                      (if (/= 0 (length sbdataq))
+                          (log +debug+ "sbdata: ~a" sbdataq))
                       (if sb-option-callback ;;TODO: change here
                           (sb-option-callback sock-stream-out sbdataq))
-                      (if debug-on (format #t "~%....SE........~%")))
+                      (log +debug+ "~%....SE........~%"))
                      (else
                       (if option-callback
                           (option-callback sock-stream-out c +NOOPT+)
-                          (if debug-on
-                              (format #t "IAC ~d not recognized" (char->ascii c)))))))))
+                          (log +debug+ "IAC ~d not recognized" (char->ascii c))))))))
              ((2) ;;length of iacseq
               (set! cmd (list-ref iacseq 1))
               (set-iacseq! tn nil)
@@ -315,20 +247,18 @@
               (cond
                ((or (char=? cmd +DO+)
                     (char=? cmd +DONT+))
-                (if debug-on
-                    (format #t "IAC ~s ~d~%"
-                            (if (char=? cmd +DO+)
-                                "DO" "DONT")
-                            (char->ascii opt)))
+                (log +debug+ "IAC ~s ~d~%"
+                        (if (char=? cmd +DO+)
+                            "DO" "DONT")
+                        (char->ascii opt))
                 (if option-callback
                     (option-callback sock-stream-out cmd opt)
                     (begin
                       (format sock-stream-out "~a~a~a" +IAC+ +WONT+ opt))))
                ((or (char=? cmd +WILL+)
                     (char=? cmd +WONT+))
-                (if debug-on
-                    (format #t "IAC ~s ~d~%" (if (char=? cmd +WILL+) "WILL" "WONT")
-                            (char->ascii opt)))
+                (log +debug+ "IAC ~s ~d~%" (if (char=? cmd +WILL+) "WILL" "WONT")
+                        (char->ascii opt))
                 (if option-callback
                     (option-callback sock-stream-out cmd opt)
                     (format sock-stream-out "~a~a~a" +IAC+ +DONT+ opt))))))
@@ -399,7 +329,7 @@
 ; By default the timeout is 600 secs
 ; Note: timeout is in seconds.
 (with-record-fields
- (debug-on sock cookedq eof)
+ (sock cookedq eof)
  telnet tn
  (define (read-until tn str case-sensitive . timeout)
    (let ((sock-stream-in (socket:inport sock))
@@ -427,16 +357,16 @@
              (values (read-cookedq% tn pos) +ok+))
            (if eof
                (begin
-                 (format #t "eof!!")
+                 (log +info+ "eof!!")
                  (values nil +eof+))
                (begin
                  (let inner-loop ()
                    (when timeout
                          (set! elasped-time (- (time) start-time)))
                    (if (and timeout (>= elasped-time timeout))
-                       (begin (format #t "TimeOut!") (values nil +timeout+))
+                       (begin (log +info+ "TimeOut!") (values nil +timeout+))
                        (case (wait-until-readable% sock-stream-in (- timeout elasped-time))
-                         ((nil) (begin (format #t "TimeOut!") (values nil +timeout+)))
+                         ((nil) (begin (log +info+ "TimeOut!") (values nil +timeout+)))
                          (else
                           (process-sleep .25) ;sleep for 250 ms
                           (set! read-status (process-sock-stream% tn block-read))
@@ -444,7 +374,7 @@
                               (outer-loop)
                               (if eof
                                   (begin
-                                    (format #t "eof!!")
+                                    (log +info+ "eof!!")
                                     (values nil +eof+))
                                   (inner-loop))))))))))))))
 
