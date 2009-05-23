@@ -342,7 +342,7 @@
           (start-time nil)
           (elasped-time nil)
           (str-len (string-length str)))
-     (if timeout (set! start-time (time)))
+     (when timeout (set! start-time (time)))
      (let outer-loop ()
        (set! data-len (length cookedq))
        (if (>= (- data-len search-start) str-len)
@@ -351,34 +351,88 @@
              (set! search-start (+ 2 (- data-len (+ 1 str-len)))))
            (set! pos -1))
 
-       (if (>= pos 0)
-           (begin
-             (set! pos (+ pos str-len))
-             (values (read-cookedq% tn pos) +ok+))
-           (if eof
-               (begin
-                 (log +info+ "eof!!")
-                 (values nil +eof+))
-               (begin
-                 (let inner-loop ()
-                   (when timeout
-                         (set! elasped-time (- (time) start-time)))
-                   (if (and timeout (>= elasped-time timeout))
-                       (begin (log +info+ "TimeOut!") (values nil +timeout+))
-                       (case (wait-until-readable% sock-stream-in (- timeout elasped-time))
-                         ((nil) (begin (log +info+ "TimeOut!") (values nil +timeout+)))
-                         (else
-                          (process-sleep .25) ;sleep for 250 ms
-                          (set! read-status (process-sock-stream% tn block-read))
-                          (if (= read-status +new-data+)
-                              (outer-loop)
-                              (if eof
-                                  (begin
-                                    (log +info+ "eof!!")
-                                    (values nil +eof+))
-                                  (inner-loop))))))))))))))
+       (cond
+        ((>= pos 0)
+         (set! pos (+ pos str-len))
+         (values (read-cookedq% tn pos) +ok+))
+        (eof
+         (log +info+ "eof!!")
+         (values nil +eof+))
+        (else
+         (let inner-loop ()
+           (when timeout (set! elasped-time (- (time) start-time)))
+           (if (and timeout (>= elasped-time timeout))
+               (begin (log +info+ "TimeOut!") (values nil +timeout+))
+               (case (wait-until-readable% sock-stream-in (- timeout elasped-time))
+                 ((nil) (begin (log +info+ "TimeOut!") (values nil +timeout+)))
+                 (else
+                  (process-sleep .25) ;sleep for 250 ms
+                  (set! read-status (process-sock-stream% tn block-read))
+                  (cond
+                   ((= read-status +new-data+) (outer-loop))
+                   (eof (log +info+ "eof!!")
+                        (values nil +eof+))
+                   (else (inner-loop)))))))))))))
 
-
+; Read until one from a list of given strings is encountered.
+; When no match is found, return nil with a +eof+ or +timeout+ .
+; By default the timeout is 600 secs
+; Returns (values string-read/nil +ok+/+eof+/+timeout+ -1/index-of-match-in-strings)
+; Note: timeout is in seconds.
+(with-record-fields
+ (sock cookedq eof)
+ telnet tn
+ (define (read-until-2 tn strings case-sensitive . timeout)
+   (if (= (length strings) 1)
+       (read-until tn (first strings) case-sensitive timeout)
+       (let ((sock-stream-in (socket:inport sock))
+             (pos -1)
+             (block-read (if (null? timeout) #t #f))
+             (timeout (if (null? timeout) 600 (first timeout)))
+             (read-status (process-sock-stream% tn))
+             (data-len nil)
+             (start-time nil)
+             (work-list
+              (map (lambda (str)
+                     (list 0 (string-length str) str)) strings))
+             (match-ind nil) ;index in strings that matched
+             (elasped-time nil))
+         (when timeout (set! start-time (time)))
+         (let outer-loop ()
+           (set! data-len (length cookedq))
+           (set! match-ind -1)
+           (let work-list-loop ((wl work-list))
+             (set! match-ind (+ 1 match-ind))
+             (when (not (null? wl))
+                   (when (>= (- data-len (first (car wl))) (second (car wl)))
+                       (begin 
+                         (set! pos (search (third (car wl)) (list->string cookedq) (first (car wl)) case-sensitive))
+                         (if (< pos 0)
+                             (begin 
+                               (set-car! (car wl) (+ 2 (- data-len (+ 1 (second (car wl))))))
+                               (work-list-loop (cdr wl)))
+                             (set! pos (+ pos (second (car wl)))))))))
+           (cond
+            ((>= pos 0)
+             (values (read-cookedq% tn pos) +ok+ match-ind))
+            (eof
+             (log +info+ "eof!!")
+             (values nil +eof+ -1))
+            (else
+             (let inner-loop ()
+               (when timeout (set! elasped-time (- (time) start-time)))
+               (if (and timeout (>= elasped-time timeout))
+                   (begin (log +info+ "TimeOut!") (values nil +timeout+ -1))
+                   (case (wait-until-readable% sock-stream-in (- timeout elasped-time))
+                     ((nil) (begin (log +info+ "TimeOut!") (values nil +timeout+ -1)))
+                     (else
+                      (process-sleep .25) ;sleep for 250 ms
+                      (set! read-status (process-sock-stream% tn block-read))
+                      (cond
+                       ((= read-status +new-data+) (outer-loop))
+                       (eof (log +info+ "eof!!")
+                            (values nil +eof+ -1))
+                       (else (inner-loop))))))))))))))
 
 (define (write-ln tn str)
   (format (socket:outport (telnet:sock tn)) "~a~%" str))
