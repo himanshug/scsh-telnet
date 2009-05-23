@@ -277,13 +277,13 @@
 (define (peek-available-data tn . block-read)
    (let ((block-read (if (null? block-read) #f (first block-read))))
     (process-sock-stream% tn block-read)
-    (apply list (telnet:cookedq tn))))
+    (list->string (telnet:cookedq tn))))
 
 (define (read-available-data tn . block-read)
   (let ((block-read (if (null? block-read) #f (first block-read)))
         (result nil))
     (process-sock-stream% tn block-read)
-    (set! result (apply list (telnet:cookedq tn)))
+    (set! result (list->string (telnet:cookedq tn)))
     (set-telnet:cookedq nil)
     result))
 
@@ -327,6 +327,7 @@
 ; Read until a given string is encountered.
 ; When no match is found, return nil with a +eof+ or +timeout+ .
 ; By default the timeout is 600 secs
+; Returns (values string-read/nil +ok+/+eof+/+timeout+)
 ; Note: timeout is in seconds.
 (with-record-fields
  (sock cookedq eof)
@@ -433,6 +434,8 @@
                        (eof (log +info+ "eof!!")
                             (values nil +eof+ -1))
                        (else (inner-loop))))))))))))))
+
+
 
 (define (write-ln tn str)
   (format (socket:outport (telnet:sock tn)) "~a~%" str))
