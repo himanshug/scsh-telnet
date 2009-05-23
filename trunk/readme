@@ -1,0 +1,90 @@
+;; Author: Himanshu Gupta (g DOT himanshu AT gmail DOT com)
+
+;; This is client side implementation of telnet for scsh
+;; (http://www.scsh.net/). Its pretty much the port of
+;; telnetlib(http://www.cliki.net/telnetlib) from lisp
+;; to scheme.
+
+;; HOW TO USE:
+(load "path/to/utils.scm")
+(load "path/to/logger.scm")
+(load "path/to/telnet.scm")
+
+;; EXTERNAL INTERFACE:
+;; Open a telnet session with given host and port. Default port
+;; is 23.
+;; Returns: a telnet record
+;; (define (open-telnet-session host . port)....)
+
+;; Closes the telnet session of given telnet record.
+;; (define (close-telnet-session tn)....)
+
+;; Peeks some data and returns as strings.
+;; (define (peek-available-data tn . block-read)....)
+
+;; Reads aome data and returns as string
+;; (define (read-available-data tn . block-read)....)
+
+;; Read until a given string is encountered.
+;; When no match is found, return nil with a +eof+ or +timeout+ .
+;; By default the timeout is 600 secs
+;; Returns (values string-read/nil +ok+/+eof+/+timeout+)
+;; Note: timeout is in seconds.
+;; (define (read-until tn str case-sensitive . timeout)....)
+
+;; Read until one from a list of given strings is encountered.
+;; When no match is found, return nil with a +eof+ or +timeout+ .
+;; By default the timeout is 600 secs
+;; Returns (values string-read/nil +ok+/+eof+/+timeout+ -1/index-of-match-in-strings)
+;; Note: timeout is in seconds.
+;; (define (read-until-2 tn str case-sensitive . timeout)....)
+
+;; Write a line to telnet connection socket.
+;; (define (write-ln tn str)....)
+
+;; Write a line to telnet connection socket ending with CR,LF
+;; (define (write-ln-crlr tn str)....)
+
+;; EXAMPLES:
+(define (exp-1)
+  (let ((tn (open-telnet-session "127.0.0.1")))
+    (call-with-values
+        (lambda () (read-until tn "ogin:" #f))
+      (lambda (str ind) (display str)
+              (display ind)))
+    (write-ln tn "user")
+    (call-with-values
+        (lambda () (read-until tn "assword: " #f))
+      (lambda (str ind) (display str)))
+    (write-ln tn "password")
+    (call-with-values
+        (lambda () (read-until tn "~]$" #f))
+      (lambda (str ind) (display str)))
+    (write-ln tn "ls")
+        (call-with-values
+        (lambda () (read-until tn "~]$" #f))
+      (lambda (str ind) (display str)))
+    (write-ln tn "exit")
+    (close-telnet-session tn)))
+
+(define (exp-2)
+  (let ((tn (open-telnet-session "127.0.0.1")))
+    (call-with-values
+        (lambda () (read-until-2 tn 
+                                 (list "xxxx" "ogin:") #f))
+      (lambda (str res ind) (display str)
+              (format #t "~a~%"  ind)))
+    (write-ln tn "user")
+    (call-with-values
+        (lambda () (read-until tn "assword: " #f))
+      (lambda (str ind) (display str)))
+    (write-ln tn "password")
+    (call-with-values
+        (lambda () (read-until tn "~]$" #f))
+      (lambda (str ind) (display str)))
+    (write-ln tn "ls")
+        (call-with-values
+        (lambda () (read-until tn "~]$" #f))
+      (lambda (str ind) (display str)))
+    (write-ln tn "exit")
+    (close-telnet-session tn)))
