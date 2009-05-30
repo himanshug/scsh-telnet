@@ -437,6 +437,52 @@
 
 
 
+; Read until a match to given regex is found.
+; When no match is found, return nil with a +eof+ or +timeout+ .
+; By default the timeout is 600 secs
+; Returns (values string-read/nil +ok+/+eof+/+timeout+)
+; Note: timeout is in seconds.
+(with-record-fields
+ (sock cookedq eof)
+ telnet tn
+ (define (expect tn regex case-sensitive . timeout)
+   (let ((sock-stream-in (socket:inport sock))
+          (pos nil)
+          (block-read (if (null? timeout) #t #f))
+          (timeout (if (null? timeout) 600 (first timeout)))
+          (read-status (process-sock-stream% tn))
+          (match nil)
+          (start-time nil)
+          (elasped-time nil))
+     (when timeout (set! start-time (time)))
+     (let outer-loop ()
+       (set! match (regexp-search regex (list->string cookedq)))
+       (if match
+           (set! pos (match:end match))
+           (set! pos -1))
+
+       (cond
+        ((>= pos 0)
+         (values (read-cookedq% tn pos) +ok+))
+        (eof
+         (log +info+ "eof!!")
+         (values nil +eof+))
+        (else
+         (let inner-loop ()
+           (when timeout (set! elasped-time (- (time) start-time)))
+           (if (and timeout (>= elasped-time timeout))
+               (begin (log +info+ "TimeOut!") (values nil +timeout+))
+               (case (wait-until-readable% sock-stream-in (- timeout elasped-time))
+                 ((nil) (begin (log +info+ "TimeOut!") (values nil +timeout+)))
+                 (else
+                  (process-sleep .25) ;sleep for 250 ms
+                  (set! read-status (process-sock-stream% tn block-read))
+                  (cond
+                   ((= read-status +new-data+) (outer-loop))
+                   (eof (log +info+ "eof!!")
+                        (values nil +eof+))
+                   (else (inner-loop)))))))))))))
+
 (define (write-ln tn str)
   (format (socket:outport (telnet:sock tn)) "~a~%" str))
 
