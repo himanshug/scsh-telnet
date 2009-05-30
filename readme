@@ -39,6 +39,13 @@
 ;; Note: timeout is in seconds.
 ;; (define (read-until-2 tn str case-sensitive . timeout)....)
 
+;; Read until a given regex match is encountered.
+;; When no match is found, return nil with a +eof+ or +timeout+ .
+;; By default the timeout is 600 secs
+;; Returns (values string-read/nil +ok+/+eof+/+timeout+)
+;; Note: timeout is in seconds.
+;; (define (expect tn regex case-sensitive . timeout)....)
+
 ;; Write a line to telnet connection socket.
 ;; (define (write-ln tn str)....)
 
@@ -50,13 +57,35 @@
   (let ((tn (open-telnet-session "127.0.0.1")))
     (call-with-values
         (lambda () (read-until tn "ogin:" #f))
-      (lambda (str ind) (display str)
-              (display ind)))
-    (write-ln tn "user")
+      (lambda (str res) (display str)))
+    (write-ln tn "himanshu")
+    (call-with-values
+        (lambda () (read-until tn "assword: " #f))
+      (lambda (str res) (display str)))
+    (write-ln tn "himanshu")
+    (call-with-values
+        (lambda () (read-until tn "~]$" #f))
+      (lambda (str res) (display str)))
+    (write-ln tn "ls")
+        (call-with-values
+        (lambda () (read-until tn "~]$" #f))
+      (lambda (str res) (display str)))
+    (write-ln tn "exit")
+    (close-telnet-session tn)))
+
+
+(define (exp-2)
+  (let ((tn (open-telnet-session "127.0.0.1")))
+    (call-with-values
+        (lambda () (read-until-2 tn 
+                                 (list "xxxx" "ogin:") #f))
+      (lambda (str res ind) (display str)
+              (format #t "~a~%"  ind)))
+    (write-ln tn "himanshu")
     (call-with-values
         (lambda () (read-until tn "assword: " #f))
       (lambda (str ind) (display str)))
-    (write-ln tn "password")
+    (write-ln tn "himanshu")
     (call-with-values
         (lambda () (read-until tn "~]$" #f))
       (lambda (str ind) (display str)))
@@ -67,24 +96,23 @@
     (write-ln tn "exit")
     (close-telnet-session tn)))
 
-(define (exp-2)
+
+(define (exp-3)
   (let ((tn (open-telnet-session "127.0.0.1")))
     (call-with-values
-        (lambda () (read-until-2 tn 
-                                 (list "xxxx" "ogin:") #f))
-      (lambda (str res ind) (display str)
-              (format #t "~a~%"  ind)))
-    (write-ln tn "user")
+        (lambda () (expect tn (rx (: "ogin:")) #f))
+      (lambda (str res) (display str)))
+    (write-ln tn "himanshu")
     (call-with-values
-        (lambda () (read-until tn "assword: " #f))
-      (lambda (str ind) (display str)))
-    (write-ln tn "password")
+        (lambda () (expect tn (rx (: "assword: ")) #f))
+      (lambda (str res) (display str)))
+    (write-ln tn "himanshu")
     (call-with-values
-        (lambda () (read-until tn "~]$" #f))
-      (lambda (str ind) (display str)))
+        (lambda () (expect tn (rx (: "~]$")) #f))
+      (lambda (str res) (display str)))
     (write-ln tn "ls")
         (call-with-values
-        (lambda () (read-until tn "~]$" #f))
-      (lambda (str ind) (display str)))
+        (lambda () (expect tn (rx (: "~]$")) #f))
+      (lambda (str res) (display str)))
     (write-ln tn "exit")
     (close-telnet-session tn)))
