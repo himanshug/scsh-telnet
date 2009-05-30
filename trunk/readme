@@ -6,6 +6,7 @@
 ;; to scheme.
 
 ;; HOW TO USE:
+,open defrec-package
 (load "path/to/utils.scm")
 (load "path/to/logger.scm")
 (load "path/to/telnet.scm")
