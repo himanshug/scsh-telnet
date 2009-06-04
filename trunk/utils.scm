@@ -17,6 +17,7 @@
                (replace x item1 item2 eq-pred?)
                (if (eq? x item1) item2 x))) list)))
 
+
 ;macros
 ;*************************************************************
 ;when macro
@@ -39,6 +40,15 @@
     ((/= num1 num2)
      (not (= num1 num2)))))
 
+;macro to return first value of the multiple-values-stmt passed.
+;where multiple-values-stmt is a form that on evaluation results
+;in (values val1 val2 ...)
+(define-syntax first-value
+  (syntax-rules ()
+    ((first-value multiple-values-stmt)
+     (call-with-values
+         (lambda () multiple-values-stmt)
+       (lambda (fval . othrs) fval)))))
 
 ; a macro to mimic with-slots in lisp for records
 ; syntax:

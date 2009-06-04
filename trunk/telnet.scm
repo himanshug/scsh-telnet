@@ -284,7 +284,7 @@
         (result nil))
     (process-sock-stream% tn block-read)
     (set! result (list->string (telnet:cookedq tn)))
-    (set-telnet:cookedq nil)
+    (set-telnet:cookedq tn nil)
     result))
 
 ; searches for occurance of string str1 in str2

@@ -12,6 +12,11 @@
 (load "path/to/telnet.scm")
 
 ;; EXTERNAL INTERFACE:
+;; macro to return first value of the multiple-values-stmt passed.
+;; where multiple-values-stmt is a form that on evaluation results
+;; in (values val1 val2 ...)
+;; (define-syntax first-value multiple-value-stmt..)
+
 ;; Open a telnet session with given host and port. Default port
 ;; is 23.
 ;; Returns: a telnet record
@@ -21,9 +26,11 @@
 ;; (define (close-telnet-session tn)....)
 
 ;; Peeks some data and returns as strings.
+;; block-read is false by default
 ;; (define (peek-available-data tn . block-read)....)
 
 ;; Reads aome data and returns as string
+;; block-read is false by default
 ;; (define (read-available-data tn . block-read)....)
 
 ;; Read until a given string is encountered.
@@ -56,64 +63,47 @@
 ;; EXAMPLES:
 (define (exp-1)
   (let ((tn (open-telnet-session "127.0.0.1")))
-    (call-with-values
-        (lambda () (read-until tn "ogin:" #f))
-      (lambda (str res) (display str)))
+    (display (first-value (read-until tn "ogin:" #f)))
     (write-ln tn "himanshu")
-    (call-with-values
-        (lambda () (read-until tn "assword: " #f))
-      (lambda (str res) (display str)))
+    (display (first-value (read-until tn "assword: " #f)))
     (write-ln tn "himanshu")
-    (call-with-values
-        (lambda () (read-until tn "~]$" #f))
-      (lambda (str res) (display str)))
+    (display (first-value (read-until tn "~]$" #f)))
     (write-ln tn "ls")
-        (call-with-values
-        (lambda () (read-until tn "~]$" #f))
-      (lambda (str res) (display str)))
+    (display (first-value (read-until tn "~]$" #f)))
     (write-ln tn "exit")
     (close-telnet-session tn)))
-
 
 (define (exp-2)
   (let ((tn (open-telnet-session "127.0.0.1")))
-    (call-with-values
-        (lambda () (read-until-2 tn 
-                                 (list "xxxx" "ogin:") #f))
-      (lambda (str res ind) (display str)
-              (format #t "~a~%"  ind)))
+    (display (first-value (read-until-2 tn '("xxx" "ogin:") #f)))
     (write-ln tn "himanshu")
-    (call-with-values
-        (lambda () (read-until tn "assword: " #f))
-      (lambda (str ind) (display str)))
+    (display (first-value (read-until-2 tn '("assword: " "xxx") #f)))
     (write-ln tn "himanshu")
-    (call-with-values
-        (lambda () (read-until tn "~]$" #f))
-      (lambda (str ind) (display str)))
+    (display (first-value (read-until tn "~]$" #f)))
     (write-ln tn "ls")
-        (call-with-values
-        (lambda () (read-until tn "~]$" #f))
-      (lambda (str ind) (display str)))
+    (display (first-value (read-until tn "~]$" #f)))
     (write-ln tn "exit")
     (close-telnet-session tn)))
 
-
 (define (exp-3)
   (let ((tn (open-telnet-session "127.0.0.1")))
-    (call-with-values
-        (lambda () (expect tn (rx (: "ogin:")) #f))
-      (lambda (str res) (display str)))
+    (display (first-value (expect tn (rx (: "ogin:")) #f)))
     (write-ln tn "himanshu")
-    (call-with-values
-        (lambda () (expect tn (rx (: "assword: ")) #f))
-      (lambda (str res) (display str)))
+    (display (first-value (expect tn (rx (: "assword: ")) #f)))
     (write-ln tn "himanshu")
-    (call-with-values
-        (lambda () (expect tn (rx (: "~]$")) #f))
-      (lambda (str res) (display str)))
+    (display (first-value (expect tn (rx (: "~]$")) #f)))
     (write-ln tn "ls")
-        (call-with-values
-        (lambda () (expect tn (rx (: "~]$")) #f))
-      (lambda (str res) (display str)))
+    (display (first-value (expect tn (rx (: "~]$")) #f)))
     (write-ln tn "exit")
+    (close-telnet-session tn)))
+
+(define (exp-4)
+  (let ((tn (open-telnet-session "www.scsh.net" 80)))
+    (write-ln tn "GET /index.html HTTP/1.1")
+    (write-ln tn "Host: www.scsh.net")
+    (write-ln tn "")
+    (display (peek-available-data tn #t))
+    (display "peeked some data.")
+    (display (read-available-data tn))
+    (display "finished reading same data that was peeked.")
     (close-telnet-session tn)))
