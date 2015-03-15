@@ -1,0 +1,1 @@
+This is implementation of client side telnet library for scsh
